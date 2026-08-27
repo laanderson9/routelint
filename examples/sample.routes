@@ -1,0 +1,9 @@
+# example route table for a small web app
+GET /users -> list_users
+GET /users/:id -> get_user
+GET /users/new -> new_user_form
+POST /users -> create_user
+GET /users/:id -> get_user_duplicate
+GET /health/ -> health_check
+GET //status -> status_check
+bogus line without an arrow
