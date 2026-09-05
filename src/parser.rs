@@ -50,3 +50,78 @@ fn parse_line(line: &str) -> Option<(String, String, String)> {
 
     Some((method.to_uppercase(), path.to_string(), handler.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_valid_line() {
+        let (routes, unparsable) = parse("GET /users -> list_users");
+        assert!(unparsable.is_empty());
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].line, 1);
+        assert_eq!(routes[0].method, "GET");
+        assert_eq!(routes[0].path, "/users");
+        assert_eq!(routes[0].handler, "list_users");
+    }
+
+    #[test]
+    fn uppercases_the_method() {
+        let (routes, _) = parse("get /users -> list_users");
+        assert_eq!(routes[0].method, "GET");
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        let (routes, _) = parse("   GET   /users   ->   list_users   ");
+        assert_eq!(routes[0].path, "/users");
+        assert_eq!(routes[0].handler, "list_users");
+    }
+
+    #[test]
+    fn ignores_blank_lines_and_comments() {
+        let (routes, unparsable) = parse("\n# a comment\n   \nGET /users -> list_users\n");
+        assert_eq!(routes.len(), 1);
+        assert!(unparsable.is_empty());
+        // the route should still be attributed to its real line number
+        assert_eq!(routes[0].line, 4);
+    }
+
+    #[test]
+    fn rejects_a_line_without_an_arrow() {
+        let (routes, unparsable) = parse("GET /users list_users");
+        assert!(routes.is_empty());
+        assert_eq!(unparsable, vec![1]);
+    }
+
+    #[test]
+    fn rejects_a_line_with_no_handler() {
+        let (routes, unparsable) = parse("GET /users ->");
+        assert!(routes.is_empty());
+        assert_eq!(unparsable, vec![1]);
+    }
+
+    #[test]
+    fn rejects_extra_tokens_before_the_arrow() {
+        let (routes, unparsable) = parse("GET /users extra -> list_users");
+        assert!(routes.is_empty());
+        assert_eq!(unparsable, vec![1]);
+    }
+
+    #[test]
+    fn rejects_a_missing_path() {
+        let (routes, unparsable) = parse("GET -> list_users");
+        assert!(routes.is_empty());
+        assert_eq!(unparsable, vec![1]);
+    }
+
+    #[test]
+    fn tracks_line_numbers_across_multiple_lines() {
+        let (routes, unparsable) = parse("GET /a -> a\nbogus\nPOST /b -> b");
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].line, 1);
+        assert_eq!(routes[1].line, 3);
+        assert_eq!(unparsable, vec![2]);
+    }
+}

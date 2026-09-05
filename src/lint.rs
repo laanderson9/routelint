@@ -129,3 +129,119 @@ fn segments_shadow(earlier_path: &str, later_path: &str) -> bool {
     }
     has_param
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn route(line: usize, method: &str, path: &str) -> Route {
+        Route {
+            line,
+            method: method.to_string(),
+            path: path.to_string(),
+            handler: "h".to_string(),
+        }
+    }
+
+    fn rules(routes: &[Route], rule: &str) -> Vec<Finding> {
+        check_routes(routes)
+            .into_iter()
+            .filter(|f| f.rule == rule)
+            .collect()
+    }
+
+    #[test]
+    fn flags_missing_leading_slash() {
+        let routes = vec![route(1, "GET", "users")];
+        let found = rules(&routes, "missing-leading-slash");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn flags_trailing_slash_but_not_root() {
+        let routes = vec![route(1, "GET", "/users/"), route(2, "GET", "/")];
+        let found = rules(&routes, "trailing-slash");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line, 1);
+        assert_eq!(found[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn flags_empty_segment() {
+        let routes = vec![route(1, "GET", "//status")];
+        let found = rules(&routes, "empty-segment");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn flags_duplicate_routes_on_the_later_line() {
+        let routes = vec![
+            route(1, "GET", "/users/:id"),
+            route(2, "GET", "/users/:id"),
+        ];
+        let found = rules(&routes, "duplicate-route");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line, 2);
+    }
+
+    #[test]
+    fn does_not_flag_duplicates_across_different_methods() {
+        let routes = vec![route(1, "GET", "/users"), route(2, "POST", "/users")];
+        assert!(rules(&routes, "duplicate-route").is_empty());
+    }
+
+    #[test]
+    fn flags_a_static_route_shadowed_by_an_earlier_dynamic_one() {
+        let routes = vec![
+            route(1, "GET", "/users/:id"),
+            route(2, "GET", "/users/new"),
+        ];
+        let found = rules(&routes, "shadowed-route");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].line, 2);
+        assert_eq!(found[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn does_not_flag_shadowing_when_the_dynamic_route_comes_second() {
+        let routes = vec![
+            route(1, "GET", "/users/new"),
+            route(2, "GET", "/users/:id"),
+        ];
+        assert!(rules(&routes, "shadowed-route").is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_shadowing_for_mismatched_segment_counts() {
+        let routes = vec![
+            route(1, "GET", "/users/:id"),
+            route(2, "GET", "/users/:id/posts"),
+        ];
+        assert!(rules(&routes, "shadowed-route").is_empty());
+    }
+
+    #[test]
+    fn does_not_double_report_exact_duplicates_as_shadowing() {
+        let routes = vec![
+            route(1, "GET", "/users/:id"),
+            route(2, "GET", "/users/:id"),
+        ];
+        assert!(rules(&routes, "shadowed-route").is_empty());
+    }
+
+    #[test]
+    fn findings_come_back_sorted_by_line() {
+        let routes = vec![
+            route(3, "GET", "not-a-path"),
+            route(1, "GET", "/users/:id"),
+            route(2, "GET", "/users/new"),
+        ];
+        let findings = check_routes(&routes);
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        let mut sorted = lines.clone();
+        sorted.sort();
+        assert_eq!(lines, sorted);
+    }
+}
