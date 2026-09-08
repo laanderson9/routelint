@@ -3,6 +3,7 @@ mod parser;
 
 use std::env;
 use std::fs;
+use std::io::{self, Read};
 use std::process::ExitCode;
 
 use lint::{check_routes, Finding, Severity};
@@ -39,13 +40,27 @@ fn main() -> ExitCode {
         }
     };
 
-    let contents = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(err) => {
-            eprintln!("routelint: cannot read {}: {}", path, err);
-            return ExitCode::FAILURE;
+    let contents = if path == "-" {
+        let mut buf = String::new();
+        match io::stdin().read_to_string(&mut buf) {
+            Ok(_) => buf,
+            Err(err) => {
+                eprintln!("routelint: cannot read stdin: {}", err);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(err) => {
+                eprintln!("routelint: cannot read {}: {}", path, err);
+                return ExitCode::FAILURE;
+            }
         }
     };
+
+    // "<stdin>" reads better than "-" in output meant for a person or a JSON consumer.
+    let label = if path == "-" { "<stdin>".to_string() } else { path };
 
     let (routes, unparsable) = parser::parse(&contents);
     let mut findings = check_routes(&routes);
@@ -61,9 +76,9 @@ fn main() -> ExitCode {
     findings.sort_by_key(|f| f.line);
 
     if json_output {
-        print_json(&path, &findings);
+        print_json(&label, &findings);
     } else {
-        print_human(&path, &findings);
+        print_human(&label, &findings);
     }
 
     let has_errors = findings.iter().any(|f| f.severity == Severity::Error);
@@ -76,6 +91,7 @@ fn main() -> ExitCode {
 
 fn print_usage() {
     eprintln!("usage: routelint <routes-file> [--json]");
+    eprintln!("       routelint - [--json]   (read routes from stdin)");
 }
 
 fn print_human(path: &str, findings: &[Finding]) {

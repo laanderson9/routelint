@@ -44,6 +44,15 @@ examples/sample.routes:9: warning: line does not match "METHOD /path -> handler"
 Findings are sorted by line number, and the exit code is nonzero if any
 finding is an error. That makes it usable as a CI check on its own.
 
+Pass `-` instead of a file path to read the route table from stdin:
+
+```
+$ cat examples/sample.routes | routelint -
+```
+
+The output labels findings against `<stdin>` in that case instead of a
+file name.
+
 ### JSON output
 
 Pass `--json` to get machine-readable output instead, for feeding into
