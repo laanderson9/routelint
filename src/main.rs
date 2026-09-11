@@ -8,19 +8,59 @@ use std::process::ExitCode;
 
 use lint::{check_routes, Finding, Severity};
 
+const KNOWN_RULES: &[&str] = &[
+    "shadowed-route",
+    "duplicate-route",
+    "missing-leading-slash",
+    "trailing-slash",
+    "empty-segment",
+    "unparsable-line",
+];
+
+fn is_known_rule(name: &str) -> bool {
+    KNOWN_RULES.contains(&name)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
 
     let mut json_output = false;
     let mut path: Option<String> = None;
+    let mut only_rules: Vec<String> = Vec::new();
+    let mut ignore_rules: Vec<String> = Vec::new();
 
-    for arg in args {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => json_output = true,
             "-h" | "--help" => {
                 print_usage();
                 return ExitCode::SUCCESS;
             }
+            "--rule" => match args.next() {
+                Some(name) if is_known_rule(&name) => only_rules.push(name),
+                Some(name) => {
+                    eprintln!("routelint: unknown rule \"{}\"", name);
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    eprintln!("routelint: --rule requires a rule name");
+                    print_usage();
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--ignore" => match args.next() {
+                Some(name) if is_known_rule(&name) => ignore_rules.push(name),
+                Some(name) => {
+                    eprintln!("routelint: unknown rule \"{}\"", name);
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    eprintln!("routelint: --ignore requires a rule name");
+                    print_usage();
+                    return ExitCode::FAILURE;
+                }
+            },
             other => {
                 if path.is_some() {
                     eprintln!("routelint: unexpected argument \"{}\"", other);
@@ -74,6 +114,7 @@ fn main() -> ExitCode {
         });
     }
     findings.sort_by_key(|f| f.line);
+    let findings = filter_findings(findings, &only_rules, &ignore_rules);
 
     if json_output {
         print_json(&label, &findings);
@@ -89,9 +130,29 @@ fn main() -> ExitCode {
     }
 }
 
+// Ignoring a rule drops its findings before severity counts and the exit
+// code are computed, so it doubles as a way to stop a specific rule from
+// failing a CI run without silencing everything else.
+fn filter_findings(
+    findings: Vec<Finding>,
+    only_rules: &[String],
+    ignore_rules: &[String],
+) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter(|f| only_rules.is_empty() || only_rules.iter().any(|r| r == f.rule))
+        .filter(|f| !ignore_rules.iter().any(|r| r == f.rule))
+        .collect()
+}
+
 fn print_usage() {
-    eprintln!("usage: routelint <routes-file> [--json]");
+    eprintln!("usage: routelint <routes-file> [--json] [--rule NAME]... [--ignore NAME]...");
     eprintln!("       routelint - [--json]   (read routes from stdin)");
+    eprintln!();
+    eprintln!("  --rule NAME    only report findings for this rule (repeatable)");
+    eprintln!("  --ignore NAME  suppress findings for this rule (repeatable)");
+    eprintln!();
+    eprintln!("known rules: {}", KNOWN_RULES.join(", "));
 }
 
 fn print_human(path: &str, findings: &[Finding]) {
@@ -153,4 +214,58 @@ fn json_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(rule: &'static str) -> Finding {
+        Finding {
+            line: 1,
+            severity: Severity::Warning,
+            rule,
+            message: "msg".to_string(),
+        }
+    }
+
+    #[test]
+    fn keeps_everything_with_no_filters() {
+        let findings = vec![finding("duplicate-route"), finding("trailing-slash")];
+        let result = filter_findings(findings, &[], &[]);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn only_rules_keeps_just_the_named_rules() {
+        let findings = vec![finding("duplicate-route"), finding("trailing-slash")];
+        let only = vec!["trailing-slash".to_string()];
+        let result = filter_findings(findings, &only, &[]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].rule, "trailing-slash");
+    }
+
+    #[test]
+    fn ignore_removes_the_named_rule() {
+        let findings = vec![finding("duplicate-route"), finding("trailing-slash")];
+        let ignore = vec!["duplicate-route".to_string()];
+        let result = filter_findings(findings, &[], &ignore);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].rule, "trailing-slash");
+    }
+
+    #[test]
+    fn ignore_wins_over_a_conflicting_only_rule() {
+        let findings = vec![finding("duplicate-route")];
+        let only = vec!["duplicate-route".to_string()];
+        let ignore = vec!["duplicate-route".to_string()];
+        let result = filter_findings(findings, &only, &ignore);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn recognizes_known_rule_names() {
+        assert!(is_known_rule("shadowed-route"));
+        assert!(!is_known_rule("not-a-real-rule"));
+    }
 }

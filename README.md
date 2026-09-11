@@ -66,6 +66,23 @@ $ routelint examples/sample.routes --json
 Each finding is an object with `line`, `severity` (`"error"` or
 `"warning"`), `rule`, and `message`. The top-level object also has `file`.
 
+### Filtering by rule
+
+Pass `--rule NAME` (repeatable) to only report findings from specific
+rules, or `--ignore NAME` (repeatable) to suppress specific rules
+entirely:
+
+```
+$ routelint examples/sample.routes --rule shadowed-route --rule duplicate-route
+$ routelint examples/sample.routes --ignore trailing-slash
+```
+
+`--ignore` drops those findings before the error/warning counts and exit
+code are computed, so ignoring the only rule a file violates makes
+routelint exit 0 for it. `--rule` and `--ignore` accept any of:
+`shadowed-route`, `duplicate-route`, `missing-leading-slash`,
+`trailing-slash`, `empty-segment`, `unparsable-line`.
+
 ## Building
 
 ```
